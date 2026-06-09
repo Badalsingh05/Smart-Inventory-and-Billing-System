@@ -1,5 +1,5 @@
 import streamlit as st
-import psycopg2
+import sqlite3
 from datetime import datetime, date
 import sys
 import os
@@ -20,16 +20,7 @@ def initialize_tables():
         Product.create_table()
         Sale.create_table()
         SaleItem.create_table()
-        
-        # Fix sequences for all tables
-        cur = conn.cursor()
-        cur.execute("SELECT setval('customers_id_seq', (SELECT MAX(id) FROM customers))")
-        cur.execute("SELECT setval('products_id_seq', (SELECT MAX(id) FROM products))")
-        cur.execute("SELECT setval('sales_id_seq', (SELECT MAX(id) FROM sales))")
-        cur.execute("SELECT setval('sale_items_id_seq', (SELECT MAX(id) FROM sale_items))")
         conn.commit()
-        cur.close()
-        
         st.success("Database tables initialized successfully!")
     except Exception as e:
         st.error(f"Error initializing tables: {e}")
@@ -112,11 +103,6 @@ elif menu_option == "Customer Management":
                     try:
                         Customer.insert_customer(name, contact)
                         st.success(f"Customer '{name}' added successfully!")
-                        # Refresh sequence
-                        cur = conn.cursor()
-                        cur.execute("SELECT setval('customers_id_seq', (SELECT MAX(id) FROM customers))")
-                        conn.commit()
-                        cur.close()
                     except Exception as e:
                         st.error(f"Error adding customer: {e}")
                 else:
@@ -133,7 +119,7 @@ elif menu_option == "Customer Management":
                 if selected_id:
                     # Get current customer data
                     cur = conn.cursor()
-                    cur.execute('SELECT * FROM customers WHERE id = %s', (selected_id,))
+                    cur.execute('SELECT * FROM customers WHERE id = ?', (selected_id,))
                     customer = cur.fetchone()
                     cur.close()
                     
@@ -168,11 +154,6 @@ elif menu_option == "Customer Management":
                         try:
                             Customer.delete_customer(customer_id)
                             st.success(f"Customer '{selected_customer}' deleted successfully!")
-                            # Refresh sequence
-                            cur = conn.cursor()
-                            cur.execute("SELECT setval('customers_id_seq', (SELECT MAX(id) FROM customers))")
-                            conn.commit()
-                            cur.close()
                         except Exception as e:
                             st.error(f"Error deleting customer: {e}")
                     else:
@@ -214,11 +195,6 @@ elif menu_option == "Product Management":
                     try:
                         Product.insert_product(name, description, price, quantity)
                         st.success(f"Product '{name}' added successfully!")
-                        # Refresh sequence
-                        cur = conn.cursor()
-                        cur.execute("SELECT setval('products_id_seq', (SELECT MAX(id) FROM products))")
-                        conn.commit()
-                        cur.close()
                     except Exception as e:
                         st.error(f"Error adding product: {e}")
                 else:
@@ -269,11 +245,6 @@ elif menu_option == "Product Management":
                         try:
                             Product.delete_product(product_id)
                             st.success(f"Product '{selected_product}' deleted successfully!")
-                            # Refresh sequence
-                            cur = conn.cursor()
-                            cur.execute("SELECT setval('products_id_seq', (SELECT MAX(id) FROM products))")
-                            conn.commit()
-                            cur.close()
                         except Exception as e:
                             st.error(f"Error deleting product: {e}")
                     else:
@@ -311,17 +282,13 @@ elif menu_option == "Sales Management":
                             try:
                                 # Insert sale
                                 cur = conn.cursor()
-                                cur.execute('''INSERT INTO sales (customer_id, date, total_amount)
-                                               VALUES (%s, %s, %s) RETURNING id''',
-                                            (customer_id, sale_date, 0.0))
-                                sale_id = cur.fetchone()[0]
+                                cur.execute(
+                                    '''INSERT INTO sales (customer_id, date, total_amount)
+                                       VALUES (?, ?, ?)''',
+                                    (customer_id, str(sale_date), 0.0)
+                                )
                                 conn.commit()
-                                cur.close()
-                                
-                                # Refresh sequence
-                                cur = conn.cursor()
-                                cur.execute("SELECT setval('sales_id_seq', (SELECT MAX(id) FROM sales))")
-                                conn.commit()
+                                sale_id = cur.lastrowid
                                 cur.close()
                                 
                                 st.success(f"Sale created successfully with ID: {sale_id}")
@@ -358,15 +325,11 @@ elif menu_option == "Sales Management":
                                             try:
                                                 # Add item to sale
                                                 cur = conn.cursor()
-                                                cur.execute('''INSERT INTO sale_items (sale_id, product_id, quantity, price)
-                                                               VALUES (%s, %s, %s, %s)''',
-                                                            (st.session_state.new_sale_id, product_id, quantity, price))
-                                                conn.commit()
-                                                cur.close()
-                                                
-                                                # Refresh sequence
-                                                cur = conn.cursor()
-                                                cur.execute("SELECT setval('sale_items_id_seq', (SELECT MAX(id) FROM sale_items))")
+                                                cur.execute(
+                                                    '''INSERT INTO sale_items (sale_id, product_id, quantity, price)
+                                                       VALUES (?, ?, ?, ?)''',
+                                                    (st.session_state.new_sale_id, product_id, quantity, price)
+                                                )
                                                 conn.commit()
                                                 cur.close()
                                                 
@@ -383,13 +346,17 @@ elif menu_option == "Sales Management":
                                         try:
                                             # Calculate total amount
                                             cur = conn.cursor()
-                                            cur.execute('SELECT SUM(quantity * price) FROM sale_items WHERE sale_id = %s', 
-                                                       (st.session_state.new_sale_id,))
+                                            cur.execute(
+                                                'SELECT SUM(quantity * price) FROM sale_items WHERE sale_id = ?',
+                                                (st.session_state.new_sale_id,)
+                                            )
                                             total_amount = cur.fetchone()[0] or 0.0
                                             
                                             # Update sale with total amount
-                                            cur.execute('UPDATE sales SET total_amount = %s WHERE id = %s',
-                                                       (total_amount, st.session_state.new_sale_id))
+                                            cur.execute(
+                                                'UPDATE sales SET total_amount = ? WHERE id = ?',
+                                                (total_amount, st.session_state.new_sale_id)
+                                            )
                                             conn.commit()
                                             cur.close()
                                             
@@ -441,9 +408,12 @@ elif menu_option == "Sales Management":
                     try:
                         # Get sale details
                         cur = conn.cursor()
-                        cur.execute('''SELECT s.id, c.name, s.date, s.total_amount 
-                                      FROM sales s JOIN customers c ON s.customer_id = c.id 
-                                      WHERE s.id = %s''', (selected_sale_id,))
+                        cur.execute(
+                            '''SELECT s.id, c.name, s.date, s.total_amount 
+                               FROM sales s JOIN customers c ON s.customer_id = c.id 
+                               WHERE s.id = ?''',
+                            (selected_sale_id,)
+                        )
                         sale = cur.fetchone()
                         
                         if sale:
@@ -455,9 +425,12 @@ elif menu_option == "Sales Management":
                             st.markdown("---")
                             
                             # Get sale items
-                            cur.execute('''SELECT p.name, si.quantity, si.price, (si.quantity * si.price) as total
-                                          FROM sale_items si JOIN products p ON si.product_id = p.id
-                                          WHERE si.sale_id = %s''', (selected_sale_id,))
+                            cur.execute(
+                                '''SELECT p.name, si.quantity, si.price, (si.quantity * si.price) as total
+                                   FROM sale_items si JOIN products p ON si.product_id = p.id
+                                   WHERE si.sale_id = ?''',
+                                (selected_sale_id,)
+                            )
                             items = cur.fetchall()
                             
                             if items:
@@ -536,10 +509,13 @@ elif menu_option == "Analytics & Reports":
             if st.button("Get Sales Report"):
                 if start_date <= end_date:
                     cur = conn.cursor()
-                    cur.execute('''SELECT s.id, c.name, s.date, s.total_amount 
-                                  FROM sales s JOIN customers c ON s.customer_id = c.id 
-                                  WHERE s.date BETWEEN %s AND %s
-                                  ORDER BY s.date DESC''', (start_date, end_date))
+                    cur.execute(
+                        '''SELECT s.id, c.name, s.date, s.total_amount 
+                           FROM sales s JOIN customers c ON s.customer_id = c.id 
+                           WHERE s.date BETWEEN ? AND ?
+                           ORDER BY s.date DESC''',
+                        (str(start_date), str(end_date))
+                    )
                     sales_data = cur.fetchall()
                     cur.close()
                     
@@ -623,10 +599,13 @@ elif menu_option == "Analytics & Reports":
                 if selected_customer:
                     customer_id = customer_dict[selected_customer]
                     cur = conn.cursor()
-                    cur.execute('''SELECT s.id, s.date, s.total_amount 
-                                  FROM sales s 
-                                  WHERE s.customer_id = %s 
-                                  ORDER BY s.date DESC''', (customer_id,))
+                    cur.execute(
+                        '''SELECT s.id, s.date, s.total_amount 
+                           FROM sales s 
+                           WHERE s.customer_id = ? 
+                           ORDER BY s.date DESC''',
+                        (customer_id,)
+                    )
                     customer_sales = cur.fetchall()
                     cur.close()
                     

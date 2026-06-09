@@ -1,5 +1,4 @@
-# Product CRUD operations (create table, insert, update, delete, view).
-import psycopg2
+import sqlite3
 from Database import conn
 
 class Product:
@@ -11,67 +10,88 @@ class Product:
 
     def create_table():
         cur = conn.cursor()
-        cur.execute('''CREATE TABLE IF NOT EXISTS products (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(100) NOT NULL,
-            description TEXT,
-            price DECIMAL(10, 2) NOT NULL,
-            quantity INTEGER NOT NULL
-        )''')
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS products (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                price REAL NOT NULL,
+                quantity INTEGER NOT NULL
+            )
+        """)
         conn.commit()
         cur.close()
 
     def insert_product(name, description, price, quantity):
         cur = conn.cursor()
-        cur.execute('''INSERT INTO products (name, description, price, quantity)
-                       VALUES (%s, %s, %s, %s)''',
-                    (name, description, price, quantity))
+        cur.execute(
+            """
+            INSERT INTO products
+            (name, description, price, quantity)
+            VALUES (?, ?, ?, ?)
+            """,
+            (name, description, price, quantity)
+        )
         conn.commit()
         cur.close()
 
     def update_product(product_id, name=None, description=None, price=None, quantity=None):
         cur = conn.cursor()
-        cur.execute('SELECT * FROM products WHERE id = %s', (product_id,))
+
+        cur.execute(
+            "SELECT * FROM products WHERE id = ?",
+            (product_id,)
+        )
+
         product = cur.fetchone()
+
         if not product:
-            print("Product not found")
             cur.close()
             return
-        update_fields = []
-        if name:
-            update_fields.append(f"name = '{name}'")
-        if description:
-            update_fields.append(f"description = '{description}'")
-        if price:
-            update_fields.append(f"price = {price}")
-        if quantity:
-            update_fields.append(f"quantity = {quantity}")
-        update_query = f"UPDATE products SET {', '.join(update_fields)} WHERE id = %s"
-        cur.execute(update_query, (product_id,))
+
+        if name is not None and description is not None and price is not None and quantity is not None:
+            cur.execute("""
+                UPDATE products
+                SET name=?, description=?, price=?, quantity=?
+                WHERE id=?
+            """, (name, description, price, quantity, product_id))
+
+        elif quantity is not None:
+            cur.execute("""
+                UPDATE products
+                SET quantity=?
+                WHERE id=?
+            """, (quantity, product_id))
+
         conn.commit()
         cur.close()
-    
+
     def delete_product(product_id):
         cur = conn.cursor()
-        cur.execute('DELETE FROM products WHERE id = %s', (product_id,))
+        cur.execute(
+            "DELETE FROM products WHERE id=?",
+            (product_id,)
+        )
         conn.commit()
         cur.close()
 
     def view_products():
         cur = conn.cursor()
-        cur.execute('SELECT * FROM products')
+        cur.execute("SELECT * FROM products")
         products = cur.fetchall()
         cur.close()
         return products
-    
+
     def view_product_id(product_id):
         cur = conn.cursor()
-        cur.execute('SELECT * FROM products WHERE id = %s', (product_id,))
+        cur.execute(
+            "SELECT * FROM products WHERE id=?",
+            (product_id,)
+        )
         product = cur.fetchone()
         cur.close()
         return product
 
-#Menu
     def product_menu():
         while True:
             print("1. Create Table")
@@ -83,9 +103,9 @@ class Product:
             print("0. Exit")
 
             choice = input("Enter choice: ")
+
             if choice == '1':
                 Product.create_table()
-                print("Table created")
 
             elif choice == '2':
                 name = input("Enter product name: ")
@@ -93,7 +113,6 @@ class Product:
                 price = float(input("Enter product price: "))
                 quantity = int(input("Enter product quantity: "))
                 Product.insert_product(name, description, price, quantity)
-                print("Product inserted")
 
             elif choice == '3':
                 product_id = int(input("Enter product id: "))
@@ -101,26 +120,26 @@ class Product:
                 description = input("Enter product description: ")
                 price = float(input("Enter product price: "))
                 quantity = int(input("Enter product quantity: "))
-                Product.update_product(product_id, name, description, price, quantity)
-                print("Product updated")
+                Product.update_product(
+                    product_id,
+                    name,
+                    description,
+                    price,
+                    quantity
+                )
 
             elif choice == '4':
                 product_id = int(input("Enter product id: "))
                 Product.delete_product(product_id)
-                print("Product deleted")
 
             elif choice == '5':
                 products = Product.view_products()
                 for product in products:
                     print(product)
-                print("Product viewed")
-            
+
             elif choice == '6':
                 product_id = int(input("Enter product id: "))
-                product = Product.view_product_id(product_id)
-                print(product)
-                print("Product viewed")
+                print(Product.view_product_id(product_id))
 
             elif choice == '0':
-                print("Exiting...")
                 break
