@@ -3,6 +3,9 @@ import sqlite3
 from datetime import datetime, date
 import sys
 import os
+from auto_data_generated import generate_data
+
+generate_data()
 
 # Add the models directory to the path
 sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
